@@ -43,6 +43,7 @@ class STTOptions:
     model: DeepgramModels
     smart_format: bool
     endpointing: int | None
+    diariation: bool
 
 
 class STT(stt.STT):
@@ -58,6 +59,7 @@ class STT(stt.STT):
         api_key: str | None = None,
         min_silence_duration: int = 0,
         http_session: aiohttp.ClientSession | None = None,
+        diariation: bool = False,
     ) -> None:
         super().__init__(streaming_supported=True)
         api_key = api_key or os.environ.get("DEEPGRAM_API_KEY")
@@ -73,6 +75,7 @@ class STT(stt.STT):
             model=model,
             smart_format=smart_format,
             endpointing=min_silence_duration,
+            diariation=diariation,
         )
         self._session = http_session
 
@@ -218,15 +221,21 @@ class SpeechStream(stt.SpeechStream):
                         "vad_events": True,
                         "channels": self._num_channels,
                         "endpointing": self._opts.endpointing,
+                        "diarize": self._opts.diariation,
                     }
 
                     if self._opts.language:
                         live_config["language"] = self._opts.language
+                    
+                    print("Connecting to Deepgram...")
+                    print("Diarization: {self._opts.diariation}")
+                    print("Language: {self._opts.language}")
 
                     headers = {"Authorization": f"Token {self._api_key}"}
 
                     url = f"wss://api.deepgram.com/v1/listen?{urlencode(live_config).lower()}"
                     ws = await self._session.ws_connect(url, headers=headers)
+                    print("Connected to Deepgram!")
                     retry_count = 0  # connected successfully, reset the retry_count
 
                     await self._run_ws(ws)
@@ -351,6 +360,7 @@ class SpeechStream(stt.SpeechStream):
                     end_time=self._final_events[-1].alternatives[0].end_time,
                     confidence=confidence,
                     text=sentence,
+                    speaker=self._final_events[0].alternatives[0].speaker,
                 )
             ],
         )
@@ -436,6 +446,7 @@ def live_transcription_to_speech_data(
             end_time=alt["words"][-1]["end"] if alt["words"] else 0,
             confidence=alt["confidence"],
             text=alt["transcript"],
+            speaker=alt["words"][0]["speaker"] if alt["words"] else -1,
         )
         for alt in dg_alts
     ]
@@ -462,6 +473,8 @@ def prerecorded_transcription_to_speech_event(
                 end_time=alt["words"][-1]["end"] if alt["words"] else 0,
                 confidence=alt["confidence"],
                 text=alt["transcript"],
+                speaker=alt["words"][0]["speaker"] if alt["words"] else -1,
+                #words=alt["words"],
             )
             for alt in dg_alts
         ],
